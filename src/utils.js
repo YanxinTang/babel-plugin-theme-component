@@ -1,0 +1,1 @@
+exports.join = (...paths) => paths.filter(path => path).join('/');

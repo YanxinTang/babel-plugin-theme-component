@@ -1,0 +1,18 @@
+{
+  "name": "babel-plugin-theme-component",
+  "version": "0.0.1",
+  "main": "src/index.js",
+  "author": "tyx1703",
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.10.5",
+    "@babel/core": "^7.11.0",
+    "@babel/helper-module-imports": "^7.10.4",
+    "babel-plugin-component": "^1.1.1",
+    "jest": "^26.2.2"
+  }
+}
