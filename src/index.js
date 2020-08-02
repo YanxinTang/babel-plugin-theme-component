@@ -1,25 +1,16 @@
-const { join } = require('./utils');
+const { pathJoin } = require('./utils');
 const { addSideEffect, addDefault } = require('@babel/helper-module-imports');
 const { name: pluginName } = require('../package.json');
-
-const defaultOptions = {
-  libraryName: 'module',
-  libraryDirectory: 'dist',
-  style: false,
-  styleDirectory: 'dist',
-  styleExtension: 'css',
-}
-
-const imported = {
-  libraries: [],
-  modules: {},
-};
-const importAll = {};
+const defaultOptions = require('./defaultOptions');
 
 module.exports = function ({ types: t }) {
   let libraries = {};
   let specified = {};
   let selectedModule = {};
+  let imported = {
+    libraries: [],
+    modules: {},
+  };
 
   function importModule(moduleName, file, opts) {
     if (selectedModule[moduleName]) {
@@ -42,23 +33,22 @@ module.exports = function ({ types: t }) {
       if (style && imported.modules[libraryName]) {
         console.warn(`[${pluginName}] If you are using both on-demand and importing all, make sure to invoke the importing all first.`);
       }
-      modulePath = join(libraryName);
+      modulePath = pathJoin(libraryName);
     } else {
       if (imported.modules[libraryName]) {
-        console.log(imported.modules[libraryName])
         imported.modules[libraryName].push(moduleName);
       } else {
         imported.modules[libraryName] = [moduleName];
       }
       // else imported module is a component sub module
-      modulePath = join(libraryName, libraryDirectory, moduleName);
+      modulePath = pathJoin(libraryName, libraryDirectory, moduleName);
     }
 
     if (style) {
       if (isLibraryModule || !imported.libraries.includes(libraryName)) {
         // if library already been imported all, do not import component style
         const styleName = isLibraryModule ? 'index' : moduleName;
-        const stylePath = join(libraryName, styleDirectory, `${styleName}.${styleExtension}`);
+        const stylePath = pathJoin(libraryName, styleDirectory, `${styleName}.${styleExtension}`);
         addSideEffect(file.path, stylePath);
       }
     }
@@ -69,7 +59,8 @@ module.exports = function ({ types: t }) {
     const file = (path && path.hub && path.hub.file) || (state && state.file);
     props.forEach(prop => {
       if (!t.isIdentifier(node[prop])) return;
-      if (specified[node[prop].name]) {
+      const moduleName = libraries[node[prop].name] || specified[node[prop].name];
+      if (moduleName) {
         node[prop] = importModule(node[prop].name, file, state.opts);
       }
     });
@@ -78,17 +69,23 @@ module.exports = function ({ types: t }) {
   function buildDeclaratorHandler(node, prop, path, state) {
     const file = (path && path.hub && path.hub.file) || (state && state.file);
     if (!t.isIdentifier(node[prop])) return;
-    if (specified[node[prop].name]) {
+    const moduleName = libraries[node[prop].name] || specified[node[prop].name];
+    if (moduleName) {
       node[prop] = importModule(node[prop].name, file, state.opts);
     }
   }
 
   return {
+    name: pluginName,
     visitor: {
       Program() {
         libraries = {};
         specified = {};
         selectedModule = {};
+        imported = {
+          libraries: [],
+          modules: {},
+        };
       },
       ImportDeclaration(path, { opts }) {
         const { node } = path;
@@ -110,18 +107,24 @@ module.exports = function ({ types: t }) {
         const { node } = path;
         const file = (path && path.hub && path.hub.file) || (state && state.file);
         const { name } = node.callee;
+
         if (t.isIdentifier(node.callee)) {
-          // console.log('Identifier')
-        } else {
-          node.arguments = node.arguments.map(arg => {
-            if (specified[arg.name]) {
-              return importModule(specified[arg.name], file, state.opts);
-            } else if (libraries[arg.name]) {
-              return importModule(libraries[arg.name], file, state.opts);
-            }
-            return arg;
-          });
+          if (libraries[name]) {
+            node.callee = importModule(libraries[name], file, state.opts);
+          } else if (specified[name]) {
+            node.callee = importModule(specified[name], file, state.opts);
+          }
         }
+
+        node.arguments = node.arguments.map(arg => {
+          const { name: argName } = arg;
+          if (specified[argName]) {
+            return importModule(specified[argName], file, state.opts);
+          } else if (libraries[argName]) {
+            return importModule(libraries[argName], file, state.opts);
+          }
+          return arg;
+        });
       },
       MemberExpression(path, state) { 
         const file = (path && path.hub && path.hub.file) || (state && state.file);
@@ -136,9 +139,22 @@ module.exports = function ({ types: t }) {
         if (!file) return;
         const { node } = path;
         if (node.operator !== '=') return;
-        if (libraries[node.right.name] || specified[node.right.name]) {
-          node.right = importModule(node.right.name, file, state.opts);
+        const moduleName = libraries[node.right.name] || specified[node.right.name];
+        if (moduleName) {
+          node.right = importModule(moduleName, file, state.opts);
         }
+      },
+      ArrayExpression(path, { opts }) {
+        const file = (path && path.hub && path.hub.file) || (state && state.file);
+        if (!file) return;
+        const { elements } = path.node;
+
+        elements.forEach((item, key) => {
+          const moduleName = libraries[item.name] || specified[item.name];
+          if (moduleName) {
+            elements[key] = importModule(moduleName, file, opts);
+          }
+        });
       },
       Property(path, state) {
         const { node } = path;
